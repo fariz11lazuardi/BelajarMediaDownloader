@@ -177,7 +177,10 @@ public class MediaDownloader {
     private List<String> buatPerintah(
         URI url, Path tujuan, boolean audioSaja, String pilihan, String formatFile
     ) {
-        Path tools = Path.of("tools").toAbsolutePath();
+        Path tools = Path.of(
+            System.getProperty("media.tools", "tools")
+        ).toAbsolutePath();
+
         List<String> perintah = new ArrayList<>(List.of(
             tools.resolve("yt-dlp.exe").toString(),
             "--ignore-config", "--no-playlist", "--playlist-items", "1",
