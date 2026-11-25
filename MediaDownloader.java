@@ -1,5 +1,17 @@
 import java.awt.BorderLayout;
 import java.awt.GridLayout;
+import java.awt.Dimension;
+import java.awt.Image;
+import java.awt.Color;
+import java.awt.Font;
+import java.awt.Graphics;
+import java.awt.Graphics2D;
+import java.awt.RenderingHints;
+import java.awt.Cursor;
+import javax.swing.plaf.basic.BasicComboBoxUI;
+import javax.imageio.ImageIO;
+import javax.swing.event.DocumentEvent;
+import javax.swing.event.DocumentListener;
 import java.io.BufferedReader;
 import java.io.IOException;
 import java.net.URI;
@@ -37,45 +49,439 @@ public class MediaDownloader {
         Path.of(System.getProperty("user.home"), "Downloads").toString()
     );
     private final JTextArea log = new JTextArea(12, 55);
-    private final JButton tombolUnduh = new JButton("Unduh");
+    private final JButton tombolUnduh = new TombolModern("Unduh");
+
+    private final JButton tombolCek = new TombolModern("Cek tautan");
+    private final JLabel gambarMedia = new JLabel(" ", SwingConstants.CENTER);
+    private final JTextArea infoMedia = new JTextArea(3, 28);
+
+    private record Pratinjau(String judul, ImageIcon thumbnail) {}
 
     public static void main(String[] args) {
         SwingUtilities.invokeLater(() -> new MediaDownloader().tampilkan());
     }
 
+    private static final Color KANVAS = new Color(0xF1F5FB);
+    private static final Color PUTIH = Color.WHITE;
+    private static final Color TINTA = new Color(0x142440);
+    private static final Color REDUP = new Color(0x475A75);
+    private static final Color GARIS = new Color(0xD6E1EF);
+    private static final Color AKSEN = new Color(0x2459D3);
+    private static final Color BIRU_MUDA = new Color(0xE8EFFD);
+    private static final String FONT = "Segoe UI";
+
     private void tampilkan() {
-        JPanel form = new JPanel(new GridLayout(0, 2, 8, 8));
-        form.add(new JLabel("Tautan media"));
-        form.add(tautan);
-        form.add(new JLabel("Jenis unduhan"));
-        form.add(mode);
-        form.add(new JLabel("Format file"));
-        form.add(format);
-        form.add(new JLabel("Kualitas"));
-        form.add(kualitas);
-        form.add(new JLabel("Folder tujuan"));
-        form.add(folder);
+        jendela.setTitle("MediaDownloader");
+        JPanel utama = new JPanel(new BorderLayout());
+        utama.setBackground(KANVAS);
+
+        JPanel header = new JPanel(new BorderLayout(13, 0));
+        header.setBackground(TINTA);
+        header.setBorder(new EmptyBorder(18, 24, 18, 24));
+        JLabel ikon = new JLabel("\u2193", SwingConstants.CENTER);
+        ikon.setFont(new Font(FONT, Font.BOLD, 27));
+        ikon.setForeground(PUTIH);
+        ikon.setOpaque(true);
+        ikon.setBackground(AKSEN);
+        ikon.setPreferredSize(new Dimension(42, 42));
+        header.add(ikon, BorderLayout.WEST);
+        JLabel nama = new JLabel("MediaDownloader");
+        nama.setForeground(PUTIH);
+        nama.setFont(new Font(FONT, Font.BOLD, 24));
+        header.add(nama, BorderLayout.CENTER);
+        utama.add(header, BorderLayout.NORTH);
+
+        aturKolom(tautan);
+        aturKolom(folder);
+        aturPilihan(mode);
+        aturPilihan(format);
+        aturPilihan(kualitas);
+        aturTombol(tombolCek, false);
+        aturTombol(tombolUnduh, true);
+
+        JPanel barisTautan = tanpaLatar(new BorderLayout(9, 0));
+        barisTautan.add(tautan, BorderLayout.CENTER);
+        barisTautan.add(tombolCek, BorderLayout.EAST);
+        tombolCek.setEnabled(false);
+        tombolCek.addActionListener(event -> cekTautan());
+        tautan.addActionListener(event -> tombolCek.doClick());
+        tautan.getDocument().addDocumentListener(new DocumentListener() {
+            @Override public void insertUpdate(DocumentEvent event) { tautanBerubah(); }
+            @Override public void removeUpdate(DocumentEvent event) { tautanBerubah(); }
+            @Override public void changedUpdate(DocumentEvent event) { tautanBerubah(); }
+        });
+
+        JPanel pilihan = tanpaLatar(new GridLayout(1, 3, 10, 0));
+        pilihan.add(kolom("Jenis unduhan", mode, mode));
+        pilihan.add(kolom("Format file", format, format));
+        pilihan.add(kolom("Kualitas", kualitas, kualitas));
+        JPanel barisFolder = tanpaLatar(new BorderLayout(9, 0));
+        JButton pilihFolder = new TombolModern("Pilih folder...");
+        aturTombol(pilihFolder, false);
+        pilihFolder.addActionListener(event -> pilihFolderTujuan(pilihFolder));
+        barisFolder.add(folder, BorderLayout.CENTER);
+        barisFolder.add(pilihFolder, BorderLayout.EAST);
+
+        JPanel formulir = kartu();
+        formulir.add(kolom("Tautan media", barisTautan, tautan));
+        formulir.add(Box.createVerticalStrut(12));
+        formulir.add(pilihan);
+        formulir.add(Box.createVerticalStrut(12));
+        formulir.add(kolom("Folder tujuan", barisFolder, folder));
 
         mode.addActionListener(event -> perbaruiFormat());
         format.addActionListener(event -> perbaruiKualitas());
         tombolUnduh.addActionListener(event -> mulaiUnduh());
         perbaruiFormat();
 
-        log.setEditable(false);
-        log.setLineWrap(true);
-        log.setWrapStyleWord(true);
+        gambarMedia.setPreferredSize(new Dimension(160, 90));
+        gambarMedia.setOpaque(true);
+        gambarMedia.setBackground(BIRU_MUDA);
+        gambarMedia.setForeground(REDUP);
+        gambarMedia.setFont(new Font(FONT, Font.PLAIN, 11));
+        aturTeks(infoMedia, new Font(FONT, Font.PLAIN, 15));
+        infoMedia.setText("Masukkan tautan, lalu tekan Enter atau klik Cek tautan.");
+        JPanel pratinjau = kartu();
+        pratinjau.add(label("Pratinjau media", 15));
+        pratinjau.add(Box.createVerticalStrut(9));
+        JPanel detail = tanpaLatar(new BorderLayout(14, 0));
+        detail.add(gambarMedia, BorderLayout.WEST);
+        detail.add(gulir(infoMedia), BorderLayout.CENTER);
+        pratinjau.add(detail);
 
-        JPanel isi = new JPanel(new BorderLayout(0, 12));
-        isi.setBorder(new EmptyBorder(16, 16, 16, 16));
-        isi.add(form, BorderLayout.NORTH);
-        isi.add(new JScrollPane(log), BorderLayout.CENTER);
-        isi.add(tombolUnduh, BorderLayout.SOUTH);
+        aturTeks(log, new Font("Consolas", Font.PLAIN, 12));
+        log.setRows(5);
+        JPanel aktivitas = kartu();
+        aktivitas.add(label("Aktivitas unduhan", 15));
+        aktivitas.add(Box.createVerticalStrut(7));
+        aktivitas.add(gulir(log));
 
-        jendela.setContentPane(isi);
+        JPanel atas = tanpaLatar(null);
+        atas.setLayout(new BoxLayout(atas, BoxLayout.Y_AXIS));
+        atas.add(formulir);
+        atas.add(Box.createVerticalStrut(12));
+        atas.add(pratinjau);
+        JPanel isi = tanpaLatar(new BorderLayout(0, 12));
+        isi.setBorder(new EmptyBorder(16, 22, 18, 22));
+        isi.add(atas, BorderLayout.NORTH);
+        isi.add(aktivitas, BorderLayout.CENTER);
+        JPanel aksi = tanpaLatar(new BorderLayout());
+        aksi.add(tombolUnduh, BorderLayout.EAST);
+        isi.add(aksi, BorderLayout.SOUTH);
+        utama.add(isi, BorderLayout.CENTER);
+
+        utama.setPreferredSize(new Dimension(780, 690));
+        jendela.setContentPane(utama);
         jendela.setDefaultCloseOperation(JFrame.EXIT_ON_CLOSE);
         jendela.pack();
+        jendela.setMinimumSize(new Dimension(650, 650));
         jendela.setLocationRelativeTo(null);
         jendela.setVisible(true);
+    }
+
+    private static JPanel tanpaLatar(java.awt.LayoutManager layout) {
+        JPanel panel = new JPanel(layout);
+        panel.setOpaque(false);
+        panel.setAlignmentX(java.awt.Component.LEFT_ALIGNMENT);
+        return panel;
+    }
+
+    private static JPanel kartu() {
+        JPanel panel = new JPanel();
+        panel.setBackground(PUTIH);
+        panel.setAlignmentX(java.awt.Component.LEFT_ALIGNMENT);
+        panel.setLayout(new BoxLayout(panel, BoxLayout.Y_AXIS));
+        panel.setBorder(BorderFactory.createCompoundBorder(
+            BorderFactory.createLineBorder(GARIS, 1, true), new EmptyBorder(12, 15, 12, 15)
+        ));
+        return panel;
+    }
+
+    private static JLabel label(String teks, int ukuran) {
+        JLabel label = new JLabel(teks);
+        label.setFont(new Font(FONT, Font.BOLD, ukuran));
+        label.setForeground(TINTA);
+        label.setAlignmentX(java.awt.Component.LEFT_ALIGNMENT);
+        return label;
+    }
+
+    private static JPanel kolom(String nama, JComponent isi, JComponent input) {
+        JPanel panel = tanpaLatar(new BorderLayout(0, 4));
+        JLabel petunjuk = label(nama, 13);
+        petunjuk.setLabelFor(input);
+        panel.add(petunjuk, BorderLayout.NORTH);
+        panel.add(isi, BorderLayout.CENTER);
+        return panel;
+    }
+
+    private static void aturKolom(JTextField kolom) {
+        kolom.setFont(new Font(FONT, Font.PLAIN, 14));
+        kolom.setForeground(TINTA);
+        kolom.setBackground(PUTIH);
+        kolom.setCaretColor(TINTA);
+        kolom.setBorder(BorderFactory.createCompoundBorder(
+            BorderFactory.createLineBorder(GARIS, 1, true), new EmptyBorder(6, 10, 6, 10)
+        ));
+        kolom.setPreferredSize(new Dimension(130, 37));
+    }
+
+    private static void aturPilihan(JComboBox<String> combo) {
+        combo.setFont(new Font(FONT, Font.PLAIN, 14));
+        combo.setBackground(PUTIH);
+        combo.setForeground(TINTA);
+        combo.setBorder(BorderFactory.createLineBorder(GARIS, 1, true));
+        combo.setPreferredSize(new Dimension(125, 37));
+        combo.setUI(new BasicComboBoxUI() {
+            @Override protected JButton createArrowButton() {
+                JButton panah = new javax.swing.plaf.basic.BasicArrowButton(
+                    SwingConstants.SOUTH, PUTIH, PUTIH, AKSEN, PUTIH
+                );
+                panah.setBorder(BorderFactory.createEmptyBorder());
+                return panah;
+            }
+
+            @Override
+            public void paintCurrentValueBackground(Graphics grafik, java.awt.Rectangle area, boolean fokus) {
+                grafik.setColor(fokus ? BIRU_MUDA : PUTIH);
+                grafik.fillRect(area.x, area.y, area.width, area.height);
+            }
+        });
+        combo.setRenderer(new DefaultListCellRenderer() {
+            @Override
+            public java.awt.Component getListCellRendererComponent(
+                JList<?> daftar, Object nilai, int indeks, boolean dipilih, boolean fokus
+            ) {
+                super.getListCellRendererComponent(daftar, nilai, indeks, dipilih, fokus);
+                setBorder(new EmptyBorder(5, 9, 5, 9));
+                setBackground(dipilih ? BIRU_MUDA : PUTIH);
+                setForeground(combo.isEnabled() ? TINTA : REDUP);
+                return this;
+            }
+        });
+    }
+
+    private static void aturTeks(JTextArea area, Font font) {
+        area.setEditable(false);
+        area.setLineWrap(true);
+        area.setWrapStyleWord(true);
+        area.setFont(font);
+        area.setForeground(TINTA);
+        area.setBackground(PUTIH);
+    }
+
+    private static JScrollPane gulir(JTextArea area) {
+        JScrollPane pane = new JScrollPane(area);
+        pane.setBorder(BorderFactory.createEmptyBorder());
+        pane.setAlignmentX(java.awt.Component.LEFT_ALIGNMENT);
+        return pane;
+    }
+
+    private static void aturTombol(JButton tombol, boolean utama) {
+        tombol.setFont(new Font(FONT, Font.BOLD, 13));
+        tombol.setForeground(utama ? PUTIH : AKSEN);
+        tombol.setBackground(utama ? AKSEN : BIRU_MUDA);
+        tombol.setCursor(Cursor.getPredefinedCursor(Cursor.HAND_CURSOR));
+        tombol.setPreferredSize(new Dimension(utama ? 142 : 115, utama ? 41 : 37));
+    }
+
+    private static final class TombolModern extends JButton {
+        TombolModern(String teks) {
+            super(teks);
+            setContentAreaFilled(false);
+            setBorderPainted(false);
+            setFocusPainted(false);
+            setRolloverEnabled(true);
+        }
+
+        @Override protected void paintComponent(Graphics grafik) {
+            Graphics2D bentuk = (Graphics2D) grafik.create();
+            try {
+                bentuk.setRenderingHint(RenderingHints.KEY_ANTIALIASING, RenderingHints.VALUE_ANTIALIAS_ON);
+                Color warna = isEnabled() ? getBackground() : KANVAS;
+                if (isEnabled() && getModel().isRollover()) warna = warna.darker();
+                bentuk.setColor(warna);
+                bentuk.fillRoundRect(0, 0, getWidth(), getHeight(), 10, 10);
+                if (isFocusOwner()) {
+                    bentuk.setColor(AKSEN.equals(getBackground()) ? PUTIH : AKSEN);
+                    bentuk.drawRoundRect(3, 3, getWidth() - 7, getHeight() - 7, 7, 7);
+                }
+            } finally {
+                bentuk.dispose();
+            }
+            super.paintComponent(grafik);
+        }
+    }
+
+    private boolean sedangMengecek;
+
+    private void tautanBerubah() {
+        gambarMedia.setIcon(null);
+        gambarMedia.setText(" ");
+        infoMedia.setText("Tekan Enter atau klik Cek tautan untuk melihat pratinjau.");
+        tombolCek.setEnabled(!sedangMengecek && !tautan.getText().isBlank());
+    }
+
+    private void cekTautan() {
+        String masukan = tautan.getText().strip();
+        URI url;
+        try {
+            url = URI.create(masukan);
+            if (url.getHost() == null || url.getUserInfo() != null
+                || !("http".equalsIgnoreCase(url.getScheme())
+                    || "https".equalsIgnoreCase(url.getScheme()))) {
+                throw new IllegalArgumentException();
+            }
+        } catch (IllegalArgumentException error) {
+            infoMedia.setText("Masukkan tautan HTTP atau HTTPS yang valid.");
+            return;
+        }
+
+        sedangMengecek = true;
+        tombolCek.setEnabled(false);
+        gambarMedia.setIcon(null);
+        gambarMedia.setText(" ");
+        infoMedia.setText("Mengecek tautan...");
+
+        new SwingWorker<Pratinjau, Void>() {
+            @Override
+            protected Pratinjau doInBackground() throws IOException, InterruptedException {
+                return ambilPratinjau(url);
+            }
+
+            @Override
+            protected void done() {
+                sedangMengecek = false;
+                tombolCek.setEnabled(!tautan.getText().isBlank());
+                if (!masukan.equals(tautan.getText().strip())) return;
+                try {
+                    Pratinjau hasil = get();
+                    infoMedia.setText(hasil.judul());
+                    infoMedia.setCaretPosition(0);
+                    gambarMedia.setIcon(hasil.thumbnail());
+                    gambarMedia.setText(hasil.thumbnail() == null ? "Thumbnail tidak tersedia" : "");
+                } catch (InterruptedException error) {
+                    Thread.currentThread().interrupt();
+                    infoMedia.setText("Pengecekan terhenti.");
+                } catch (ExecutionException error) {
+                    infoMedia.setText("Gagal mengecek tautan. " + error.getCause().getMessage());
+                    infoMedia.setCaretPosition(0);
+                }
+            }
+        }.execute();
+    }
+
+    private static Pratinjau ambilPratinjau(URI url) throws IOException, InterruptedException {
+        Path sementara = Files.createTempDirectory("media-preview-");
+        List<String> keluaran = new ArrayList<>();
+        try {
+            Path tools = direktoriTools();
+            List<String> perintah = new ArrayList<>(List.of(
+                tools.resolve("yt-dlp.exe").toString(),
+                "--ignore-config", "--no-playlist", "--playlist-items", "1",
+                "--skip-download", "--no-simulate", "--write-thumbnail",
+                "--convert-thumbnails", "png", "--socket-timeout", "12",
+                "--retries", "1", "--extractor-retries", "1",
+                "--ffmpeg-location", tools.toString(),
+                "--paths", "home:" + sementara, "--output", "thumbnail.%(ext)s",
+                "--print", "Judul: %(title)s"
+            ));
+            tambahkanOpsiPlatform(perintah, url);
+            perintah.addAll(List.of("--", url.toASCIIString()));
+            int status = jalankan(perintah, keluaran::add);
+            String judul = keluaran.stream().filter(baris -> baris.startsWith("Judul: "))
+                .map(baris -> baris.substring(7)).findFirst().orElse("");
+            if (judul.isBlank()) {
+                String pesan = keluaran.stream().filter(baris -> baris.startsWith("ERROR:"))
+                    .findFirst().orElse("Media tidak ditemukan.");
+                throw new IOException(pesan);
+            }
+
+            ImageIcon ikon = null;
+            Path fileGambar = sementara.resolve("thumbnail.png");
+            if (status == 0 && Files.isRegularFile(fileGambar)) {
+                var gambar = ImageIO.read(fileGambar.toFile());
+                if (gambar != null) {
+                    double skala = Math.min(160.0 / gambar.getWidth(), 90.0 / gambar.getHeight());
+                    int lebar = Math.max(1, (int) (gambar.getWidth() * skala));
+                    int tinggi = Math.max(1, (int) (gambar.getHeight() * skala));
+                    ikon = new ImageIcon(gambar.getScaledInstance(lebar, tinggi, Image.SCALE_SMOOTH));
+                }
+            }
+            return new Pratinjau(judul, ikon);
+        } finally {
+            try (var berkas = Files.list(sementara)) {
+                for (Path file : berkas.toList()) Files.deleteIfExists(file);
+            }
+            Files.deleteIfExists(sementara);
+        }
+    }
+
+    private void pilihFolderTujuan(JButton tombol) {
+        Path pembuka = direktoriTools().resolve("FolderPicker.exe");
+        if (!Files.isRegularFile(pembuka)) {
+            pilihFolderSwing();
+            return;
+        }
+
+        String folderAwal = folder.getText().strip();
+        tombol.setEnabled(false);
+        new SwingWorker<String, Void>() {
+            @Override
+            protected String doInBackground() throws IOException, InterruptedException {
+                Path hasil = Files.createTempFile("media-folder-", ".txt");
+                try {
+                    ProcessBuilder builder = new ProcessBuilder(
+                        pembuka.toString(), hasil.toString(),
+                        Long.toString(ProcessHandle.current().pid()), folderAwal
+                    );
+                    int status = builder.start().waitFor();
+                    if (status == 1) return null;
+                    if (status != 0) throw new IOException("Dialog Windows gagal dibuka.");
+                    return Files.readString(hasil, StandardCharsets.UTF_8);
+                } finally {
+                    Files.deleteIfExists(hasil);
+                }
+            }
+
+            @Override
+            protected void done() {
+                tombol.setEnabled(true);
+                try {
+                    String pilihan = get();
+                    if (pilihan != null && !pilihan.isBlank()) folder.setText(pilihan);
+                } catch (InterruptedException error) {
+                    Thread.currentThread().interrupt();
+                } catch (ExecutionException error) {
+                    pilihFolderSwing();
+                }
+            }
+        }.execute();
+    }
+
+    private void pilihFolderSwing() {
+        JFileChooser pemilih = new JFileChooser();
+        pemilih.setDialogTitle("Pilih folder tujuan unduhan");
+        pemilih.setFileSelectionMode(JFileChooser.DIRECTORIES_ONLY);
+        pemilih.setAcceptAllFileFilterUsed(false);
+
+        String teksFolder = folder.getText().strip();
+        if (!teksFolder.isEmpty()) {
+            try {
+                Path tujuan = Path.of(teksFolder).toAbsolutePath();
+                while (tujuan != null && !Files.isDirectory(tujuan)) {
+                    tujuan = tujuan.getParent();
+                }
+                if (tujuan != null) {
+                    pemilih.setCurrentDirectory(tujuan.toFile());
+                }
+            } catch (java.nio.file.InvalidPathException ignored) {
+                // Gunakan folder awal bawaan jika teks tidak valid.
+            }
+        }
+
+        if (pemilih.showOpenDialog(jendela) == JFileChooser.APPROVE_OPTION) {
+            folder.setText(pemilih.getSelectedFile().toPath().toAbsolutePath().toString());
+        }
     }
 
     private void perbaruiFormat() {
@@ -270,6 +676,19 @@ public class MediaDownloader {
         return Path.of(System.getProperty("media.tools", "tools")).toAbsolutePath();
     }
 
+    private static void tambahkanOpsiPlatform(List<String> perintah, URI url) {
+        Path tools = direktoriTools();
+        String host = url.getHost().toLowerCase(Locale.ROOT);
+        if (host.equals("tiktok.com") || host.endsWith(".tiktok.com")) {
+            perintah.addAll(List.of("--impersonate", "Chrome:Windows"));
+        }
+
+        Path deno = tools.resolve("deno.exe");
+        if (Files.isRegularFile(deno)) {
+            perintah.addAll(List.of("--js-runtimes", "deno:" + deno));
+        }
+    }
+
     private List<String> buatPerintah(
         URI url, Path tujuan, boolean audioSaja, String pilihan, String formatFile
     ) {
@@ -286,15 +705,7 @@ public class MediaDownloader {
             "--progress"
         ));
 
-        String host = url.getHost().toLowerCase(Locale.ROOT);
-        if (host.equals("tiktok.com") || host.endsWith(".tiktok.com")) {
-            perintah.addAll(List.of("--impersonate", "Chrome:Windows"));
-        }
-
-        Path deno = tools.resolve("deno.exe");
-        if (Files.isRegularFile(deno)) {
-            perintah.addAll(List.of("--js-runtimes", "deno:" + deno));
-        }
+        tambahkanOpsiPlatform(perintah, url);
 
         if (audioSaja) {
             perintah.addAll(List.of(
