@@ -50,6 +50,13 @@ public class MediaDownloader {
     );
     private final JTextArea log = new JTextArea(12, 55);
     private final JButton tombolUnduh = new TombolModern("Unduh");
+    private final JButton tombolBatal = new TombolModern("Batal");
+    private final JButton tombolBukaFolder = new TombolModern("Buka folder hasil");
+    private final java.awt.CardLayout pilihanAksiUnduhan = new java.awt.CardLayout();
+    private final JPanel aksiUnduhan = new JPanel(pilihanAksiUnduhan);
+    private Path folderHasil;
+    private final JProgressBar progres = new JProgressBar(0, 100);
+    private KendaliUnduh unduhanAktif;
 
     private final JButton tombolCek = new TombolModern("Cek tautan");
     private final JLabel gambarMedia = new JLabel(" ", SwingConstants.CENTER);
@@ -166,7 +173,34 @@ public class MediaDownloader {
         isi.add(atas, BorderLayout.NORTH);
         isi.add(aktivitas, BorderLayout.CENTER);
         JPanel aksi = tanpaLatar(new BorderLayout());
-        aksi.add(tombolUnduh, BorderLayout.EAST);
+        JPanel tombolAksi = tanpaLatar(new GridLayout(1, 2, 8, 0));
+        aturTombol(tombolBatal, false);
+        tombolBatal.setEnabled(false);
+        tombolBatal.addActionListener(event -> batalkanUnduhan());
+        aturTombol(tombolBukaFolder, false);
+        tombolBukaFolder.setPreferredSize(new Dimension(152, 37));
+        tombolBukaFolder.addActionListener(event -> bukaFolderHasil());
+        aksiUnduhan.setOpaque(false);
+        aksiUnduhan.add(tombolBatal, "batal");
+        aksiUnduhan.add(tombolBukaFolder, "folder");
+        tombolAksi.add(aksiUnduhan);
+        tombolAksi.add(tombolUnduh);
+
+        progres.setFont(new Font(FONT, Font.BOLD, 12));
+        progres.setForeground(AKSEN);
+        progres.setBackground(PUTIH);
+        progres.setBorder(BorderFactory.createLineBorder(GARIS));
+        progres.setPreferredSize(new Dimension(180, 24));
+        progres.setStringPainted(true);
+        progres.setString("Siap mengunduh");
+        JPanel indikator = tanpaLatar(new java.awt.GridBagLayout());
+        var lebarProgres = new java.awt.GridBagConstraints();
+        lebarProgres.weightx = 1;
+        lebarProgres.fill = java.awt.GridBagConstraints.HORIZONTAL;
+        lebarProgres.insets = new java.awt.Insets(0, 0, 12, 12);
+        indikator.add(progres, lebarProgres);
+        aksi.add(indikator, BorderLayout.CENTER);
+        aksi.add(tombolAksi, BorderLayout.EAST);
         isi.add(aksi, BorderLayout.SOUTH);
         utama.add(isi, BorderLayout.CENTER);
 
@@ -533,8 +567,16 @@ public class MediaDownloader {
 
         boolean mp4 = !audioSaja && "mp4".equals(formatFile);
 
+        KendaliUnduh kendali = new KendaliUnduh();
+        unduhanAktif = kendali;
+        folderHasil = null;
+        pilihanAksiUnduhan.show(aksiUnduhan, "batal");
         log.setText("Memulai unduhan...\n");
+        progres.setValue(0);
+        progres.setString("Menyiapkan unduhan...");
+        progres.setIndeterminate(true);
         tombolUnduh.setEnabled(false);
+        tombolBatal.setEnabled(true);
 
         new SwingWorker<Integer, String>() {
             @Override
@@ -542,44 +584,131 @@ public class MediaDownloader {
                 Files.createDirectories(tujuan);
 
                 if (mp4) {
-                    return unduhMp4Kompatibel(url, tujuan, pilihan, this::publish);
+                    return unduhMp4Kompatibel(url, tujuan, pilihan, this::publish, kendali);
                 }
                 return jalankan(
                     buatPerintah(url, tujuan, audioSaja, pilihan, formatFile),
-                    this::publish
+                    this::publish, kendali
                 );
             }
 
             @Override
             protected void process(List<String> baris) {
-                log.append(String.join("\n", baris) + "\n");
+                if (kendali.dibatalkan()) return;
+                for (String pesan : baris) tampilkanProgres(pesan);
                 log.setCaretPosition(log.getDocument().getLength());
             }
 
             @Override
             protected void done() {
                 try {
-                    log.append(get() == 0
-                        ? "\nUnduhan selesai.\n"
-                        : "\nUnduhan gagal. Periksa pesan di atas.\n");
+                    if (kendali.dibatalkan()) {
+                        progres.setString("Unduhan dibatalkan");
+                        log.append("\nUnduhan dibatalkan.\n");
+                    } else if (get() == 0) {
+                        progres.setValue(100);
+                        progres.setString("100% - Selesai");
+                        folderHasil = tujuan;
+                        pilihanAksiUnduhan.show(aksiUnduhan, "folder");
+                        log.append("\nUnduhan selesai.\n");
+                    } else {
+                        progres.setString("Unduhan gagal");
+                        log.append("\nUnduhan gagal. Periksa pesan di atas.\n");
+                    }
                 } catch (InterruptedException e) {
                     Thread.currentThread().interrupt();
+                    progres.setString("Proses terhenti");
                     log.append("\nProses terhenti.\n");
                 } catch (ExecutionException e) {
+                    progres.setString("Unduhan gagal");
                     log.append("\nGagal: " + e.getCause().getMessage() + "\n");
                 } finally {
+                    progres.setIndeterminate(false);
+                    tombolBatal.setEnabled(false);
                     tombolUnduh.setEnabled(true);
+                    unduhanAktif = null;
                 }
             }
         }.execute();
     }
 
+    private void bukaFolderHasil() {
+        if (folderHasil == null) return;
+        try {
+            if (!Files.isDirectory(folderHasil)) {
+                throw new IOException("Folder tujuan sudah tidak tersedia.");
+            }
+            java.awt.Desktop.getDesktop().open(folderHasil.toFile());
+        } catch (IOException | UnsupportedOperationException | IllegalArgumentException | SecurityException error) {
+            JOptionPane.showMessageDialog(jendela,
+                "Folder tidak dapat dibuka:\n" + folderHasil,
+                "Buka folder hasil", JOptionPane.WARNING_MESSAGE);
+        }
+    }
+
+    private void batalkanUnduhan() {
+        if (unduhanAktif == null) return;
+        tombolBatal.setEnabled(false);
+        progres.setIndeterminate(true);
+        progres.setString("Membatalkan...");
+        unduhanAktif.batalkan();
+    }
+
+    private void tampilkanProgres(String pesan) {
+        String awalan = "MEDIA_PROGRESS:";
+        if (pesan.startsWith(awalan)) {
+            String persentase = pesan.substring(awalan.length()).strip();
+            if (persentase.matches("[0-9]+(?:\\.[0-9]+)?%")) {
+                double angka = Double.parseDouble(persentase.substring(0, persentase.length() - 1));
+                progres.setIndeterminate(false);
+                progres.setValue((int) Math.max(0, Math.min(100, angka)));
+                progres.setString("Transfer berkas: " + persentase);
+            } else {
+                progres.setIndeterminate(true);
+                progres.setString("Mengunduh...");
+            }
+            return;
+        }
+
+        if (pesan.equals("MEDIA_POSTPROCESS") || pesan.startsWith("[Merger]")
+            || pesan.startsWith("[ExtractAudio]") || pesan.startsWith("[VideoConvertor]")
+            || pesan.startsWith("[VideoRemuxer]")) {
+            progres.setIndeterminate(true);
+            progres.setString("Memproses hasil unduhan...");
+        }
+
+        if (!pesan.equals("MEDIA_POSTPROCESS")) log.append(pesan + "\n");
+    }
+
+    private static final class KendaliUnduh {
+        private boolean batal;
+        private Process proses;
+
+        synchronized boolean dibatalkan() {
+            return batal;
+        }
+
+        synchronized Process mulai(ProcessBuilder builder) throws IOException {
+            if (batal) return null;
+            proses = builder.start();
+            return proses;
+        }
+
+        synchronized void batalkan() {
+            batal = true;
+            if (proses == null) return;
+            List<ProcessHandle> turunan = proses.descendants().toList();
+            proses.destroyForcibly();
+            for (ProcessHandle anak : turunan) anak.destroyForcibly();
+        }
+    }
+
     private int unduhMp4Kompatibel(
-        URI url, Path tujuan, String pilihan, Consumer<String> logBaris
+        URI url, Path tujuan, String pilihan, Consumer<String> logBaris, KendaliUnduh kendali
     ) throws IOException, InterruptedException {
         Path direktoriKerja = Files.createTempDirectory(tujuan, ".media-");
         try {
-            int hasil = jalankan(buatPerintah(url, direktoriKerja, false, pilihan, "mp4"), logBaris);
+            int hasil = jalankan(buatPerintah(url, direktoriKerja, false, pilihan, "mp4"), logBaris, kendali);
             if (hasil != 0) {
                 return hasil;
             }
@@ -601,8 +730,9 @@ public class MediaDownloader {
                 return 0;
             }
 
-            boolean videoKompatibel = cekCodec(sumber, "v:0", "codec_name,pix_fmt", "h264,yuv420p");
-            boolean audioKompatibel = cekCodec(sumber, "a:0", "codec_name", "aac");
+            boolean videoKompatibel = cekCodec(sumber, "v:0", "codec_name,pix_fmt", "h264,yuv420p", kendali);
+            boolean audioKompatibel = cekCodec(sumber, "a:0", "codec_name", "aac", kendali);
+            logBaris.accept("MEDIA_POSTPROCESS");
             logBaris.accept(videoKompatibel && audioKompatibel
                 ? "Menyimpan video dan audio ke MP4."
                 : "Menyesuaikan codec untuk pemutar Windows. Mohon tunggu.");
@@ -628,9 +758,9 @@ public class MediaDownloader {
                 } else if (!baris.matches("^[a-zA-Z0-9_]+=.*")) {
                     logBaris.accept(baris);
                 }
-            });
+            }, kendali);
 
-            if (hasil == 0) {
+            if (hasil == 0 && !kendali.dibatalkan()) {
                 Files.move(sementara, hasilAkhir);
                 logBaris.accept("Disimpan: " + hasilAkhir);
             }
@@ -646,23 +776,29 @@ public class MediaDownloader {
         }
     }
 
-    private static boolean cekCodec(Path file, String stream, String properti, String target)
+    private static boolean cekCodec(Path file, String stream, String properti, String target, KendaliUnduh kendali)
         throws IOException, InterruptedException {
         List<String> keluaran = new ArrayList<>();
         int hasil = jalankan(List.of(
             direktoriTools().resolve("ffprobe.exe").toString(), "-v", "error",
             "-select_streams", stream, "-show_entries", "stream=" + properti,
             "-of", "csv=p=0", file.toString()
-        ), keluaran::add);
+        ), keluaran::add, kendali);
         return hasil == 0 && keluaran.contains(target);
     }
 
     private static int jalankan(List<String> perintah, Consumer<String> logBaris)
         throws IOException, InterruptedException {
+        return jalankan(perintah, logBaris, null);
+    }
+
+    private static int jalankan(List<String> perintah, Consumer<String> logBaris, KendaliUnduh kendali)
+        throws IOException, InterruptedException {
         ProcessBuilder builder = new ProcessBuilder(perintah).redirectErrorStream(true);
         builder.environment().put("PYTHONIOENCODING", "utf-8");
 
-        Process proses = builder.start();
+        Process proses = kendali == null ? builder.start() : kendali.mulai(builder);
+        if (proses == null) return 1;
         try (BufferedReader keluaran = proses.inputReader(StandardCharsets.UTF_8)) {
             String baris;
             while ((baris = keluaran.readLine()) != null) {
@@ -702,7 +838,8 @@ public class MediaDownloader {
             "--paths", "home:" + tujuan,
             "--output", "%(title).150B [%(id)s].%(ext)s",
             "--print", "after_move:Disimpan: %(filepath)s",
-            "--progress"
+            "--progress", "--progress-delta", "0.25",
+            "--progress-template", "download:MEDIA_PROGRESS:%(progress._percent_str)s"
         ));
 
         tambahkanOpsiPlatform(perintah, url);
